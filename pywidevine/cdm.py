@@ -164,9 +164,9 @@ class Cdm:
         except (ValueError, TypeError):
             raise SignatureMismatch("Signature Mismatch on SignedDrmCertificate, rejecting certificate")
         else:
+            session.service_certificate = signed_message
             drm_certificate = DrmCertificate()
             drm_certificate.ParseFromString(signed_drm_certificate.drm_certificate)
-            session.service_certificate = drm_certificate
             return drm_certificate.provider_id
 
     def get_license_challenge(
