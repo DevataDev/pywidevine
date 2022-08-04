@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import binascii
 import random
@@ -62,13 +64,62 @@ class Cdm:
 
     MAX_NUM_OF_SESSIONS = 50  # most common limit
 
-    def __init__(self, device: Device):
+    def __init__(
+        self,
+        device_type: Union[Device.Types, str],
+        system_id: int,
+        security_level: int,
+        client_id: ClientIdentification,
+        rsa_key: RSA.RsaKey
+    ):
         """Initialize a Widevine Content Decryption Module (CDM)."""
-        if not device:
-            raise ValueError("A Widevine Device must be provided.")
-        self.device = device
+        if not device_type:
+            raise ValueError("Device Type must be provided")
+        if isinstance(device_type, str):
+            device_type = Device.Types[device_type]
+        if not isinstance(device_type, Device.Types):
+            raise TypeError(f"Expected device_type to be a {Device.Types!r} not {device_type!r}")
+
+        if not system_id:
+            raise ValueError("System ID must be provided")
+        if not isinstance(system_id, int):
+            raise TypeError(f"Expected system_id to be a {int} not {system_id!r}")
+
+        if not security_level:
+            raise ValueError("Security Level must be provided")
+        if not isinstance(security_level, int):
+            raise TypeError(f"Expected security_level to be a {int} not {security_level!r}")
+
+        if not client_id:
+            raise ValueError("Client ID must be provided")
+        if not isinstance(client_id, ClientIdentification):
+            raise TypeError(f"Expected client_id to be a {ClientIdentification} not {client_id!r}")
+
+        if not rsa_key:
+            raise ValueError("RSA Key must be provided")
+        if not isinstance(rsa_key, RSA.RsaKey):
+            raise TypeError(f"Expected rsa_key to be a {RSA.RsaKey} not {rsa_key!r}")
+
+        self.device_type = device_type
+        self.system_id = system_id
+        self.security_level = security_level
+        self.__client_id = client_id
+
+        self.__signer = pss.new(rsa_key)
+        self.__decrypter = PKCS1_OAEP.new(rsa_key)
 
         self._sessions: dict[bytes, Session] = {}
+
+    @classmethod
+    def from_device(cls, device: Device) -> Cdm:
+        """Initialize a Widevine CDM from a Widevine Device (.wvd) file."""
+        return cls(
+            device_type=device.type,
+            system_id=device.system_id,
+            security_level=device.security_level,
+            client_id=device.client_id,
+            rsa_key=device.private_key
+        )
 
     def open(self) -> bytes:
         """
@@ -100,7 +151,7 @@ class Cdm:
             raise InvalidSession(f"Session identifier {session_id!r} is invalid.")
         del self._sessions[session_id]
 
-    def set_service_certificate(self, session_id: bytes, certificate: Union[bytes, str]) -> str:
+    def set_service_certificate(self, session_id: bytes, certificate: Optional[Union[bytes, str]]) -> str:
         """
         Set a Service Privacy Certificate for Privacy Mode. (optional but recommended)
 
@@ -116,7 +167,8 @@ class Cdm:
             session_id: Session identifier.
             certificate: SignedDrmCertificate (or SignedMessage containing one) in Base64
                 or Bytes form obtained from the Service. Some services have their own,
-                but most use the common privacy cert, (common_privacy_cert).
+                but most use the common privacy cert, (common_privacy_cert). If None, it
+                will remove the current certificate.
 
         Raises:
             InvalidSession: If the Session identifier is invalid.
@@ -126,10 +178,17 @@ class Cdm:
                 match the underlying DrmCertificate.
 
         Returns the Service Provider ID of the verified DrmCertificate if successful.
+        If certificate is None, it will return the now unset certificate's Provider ID.
         """
         session = self._sessions.get(session_id)
         if not session:
             raise InvalidSession(f"Session identifier {session_id!r} is invalid.")
+
+        if certificate is None:
+            drm_certificate = DrmCertificate()
+            drm_certificate.ParseFromString(session.service_certificate.drm_certificate)
+            session.service_certificate = None
+            return drm_certificate.provider_id
 
         if isinstance(certificate, str):
             try:
@@ -238,19 +297,16 @@ class Cdm:
         if session.service_certificate and privacy_mode:
             # encrypt the client id for privacy mode
             license_request.encrypted_client_id.CopyFrom(self.encrypt_client_id(
-                client_id=self.device.client_id,
+                client_id=self.__client_id,
                 service_certificate=session.service_certificate
             ))
         else:
-            license_request.client_id.CopyFrom(self.device.client_id)
+            license_request.client_id.CopyFrom(self.__client_id)
 
         license_message = SignedMessage()
         license_message.type = SignedMessage.MessageType.LICENSE_REQUEST
         license_message.msg = license_request.SerializeToString()
-
-        license_message.signature = pss. \
-            new(self.device.private_key). \
-            sign(SHA1.new(license_message.msg))
+        license_message.signature = self.__signer.sign(SHA1.new(license_message.msg))
 
         session.context[request_id] = self.derive_context(license_message.msg)
 
@@ -315,11 +371,10 @@ class Cdm:
         if not context:
             raise InvalidContext("Cannot parse a license message without first making a license request")
 
-        session_key = PKCS1_OAEP. \
-            new(self.device.private_key). \
-            decrypt(license_message.session_key)
-
-        enc_key, mac_key_server, _ = self.derive_keys(*context, session_key)
+        enc_key, mac_key_server, _ = self.derive_keys(
+            *context,
+            key=self.__decrypter.decrypt(license_message.session_key)
+        )
 
         computed_signature = HMAC. \
             new(mac_key_server, digestmod=SHA256). \
