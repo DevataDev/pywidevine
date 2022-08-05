@@ -1,7 +1,12 @@
+*.wvd
+pywidevine/devices
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+.DS_Store
+devices/
 
 # C extensions
 *.so
