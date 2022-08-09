@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Union
 
+from google.protobuf.message import DecodeError
+
 from pywidevine.pssh import PSSH
 
 try:
@@ -18,8 +20,8 @@ except ImportError:
 from pywidevine import __version__
 from pywidevine.cdm import Cdm
 from pywidevine.device import Device
-from pywidevine.exceptions import TooManySessions, InvalidSession
-from pywidevine.license_protocol_pb2 import LicenseType, License
+from pywidevine.exceptions import TooManySessions, InvalidSession, SignatureMismatch, InvalidInitData, \
+    InvalidLicenseType, InvalidLicenseMessage, InvalidContext
 
 routes = web.RouteTableDef()
 
@@ -65,7 +67,7 @@ async def open(request: web.Request) -> web.Response:
             "message": f"Device '{device_name}' is not found or you are not authorized to use it."
         }, status=403)
 
-    cdm = request.app["cdms"].get((secret_key, device_name))
+    cdm: Optional[Cdm] = request.app["cdms"].get((secret_key, device_name))
     if not cdm:
         device = Device.load(request.app["config"]["devices"][device_name])
         cdm = request.app["cdms"][(secret_key, device_name)] = Cdm.from_device(device)
@@ -97,7 +99,7 @@ async def close(request: web.Request) -> web.Response:
     device_name = request.match_info["device"]
     session_id = bytes.fromhex(request.match_info["session_id"])
 
-    cdm = request.app["cdms"].get((secret_key, device_name))
+    cdm: Optional[Cdm] = request.app["cdms"].get((secret_key, device_name))
     if not cdm:
         return web.json_response({
             "status": 400,
@@ -106,10 +108,10 @@ async def close(request: web.Request) -> web.Response:
 
     try:
         cdm.close(session_id)
-    except InvalidSession as e:
+    except InvalidSession:
         return web.json_response({
             "status": 400,
-            "message": str(e)
+            "message": f"Invalid Session ID '{session_id.hex()}', it may have expired."
         }, status=400)
 
     return web.json_response({
@@ -139,27 +141,32 @@ async def set_service_certificate(request: web.Request) -> web.Response:
     session_id = bytes.fromhex(body["session_id"])
 
     # get cdm
-    cdm = request.app["cdms"].get((secret_key, device_name))
+    cdm: Optional[Cdm] = request.app["cdms"].get((secret_key, device_name))
     if not cdm:
         return web.json_response({
             "status": 400,
             "message": f"No Cdm session for {device_name} has been opened yet. No session to use."
         }, status=400)
 
-    if session_id not in cdm._sessions:
-        # This can happen if:
-        # - API server gets shutdown/restarted,
-        # - The user calls /challenge before /open,
-        # - The user called /open on a different IP Address
-        # - The user closed the session
-        return web.json_response({
-            "status": 400,
-            "message": "Invalid Session ID. Session ID may have Expired."
-        }, status=400)
-
     # set service certificate
     certificate = body.get("certificate")
-    provider_id = cdm.set_service_certificate(session_id, certificate)
+    try:
+        provider_id = cdm.set_service_certificate(session_id, certificate)
+    except InvalidSession:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid Session ID '{session_id.hex()}', it may have expired."
+        }, status=400)
+    except DecodeError as e:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid Service Certificate, {e}"
+        }, status=400)
+    except SignatureMismatch:
+        return web.json_response({
+            "status": 400,
+            "message": "Signature Validation failed on the Service Certificate, rejecting."
+        }, status=400)
 
     return web.json_response({
         "status": 200,
@@ -170,10 +177,11 @@ async def set_service_certificate(request: web.Request) -> web.Response:
     })
 
 
-@routes.post("/{device}/challenge/{license_type}")
-async def challenge(request: web.Request) -> web.Response:
+@routes.post("/{device}/get_license_challenge/{license_type}")
+async def get_license_challenge(request: web.Request) -> web.Response:
     secret_key = request.headers["X-Secret-Key"]
     device_name = request.match_info["device"]
+    license_type = request.match_info["license_type"]
 
     body = await request.json()
     for required_field in ("session_id", "init_data"):
@@ -187,26 +195,16 @@ async def challenge(request: web.Request) -> web.Response:
     session_id = bytes.fromhex(body["session_id"])
 
     # get cdm
-    cdm = request.app["cdms"].get((secret_key, device_name))
+    cdm: Optional[Cdm] = request.app["cdms"].get((secret_key, device_name))
     if not cdm:
         return web.json_response({
             "status": 400,
             "message": f"No Cdm session for {device_name} has been opened yet. No session to use."
         }, status=400)
 
-    if session_id not in cdm._sessions:
-        # This can happen if:
-        # - API server gets shutdown/restarted,
-        # - The user calls /challenge before /open,
-        # - The user called /open on a different IP Address
-        # - The user closed the session
-        return web.json_response({
-            "status": 400,
-            "message": "Invalid Session ID. Session ID may have Expired."
-        }, status=400)
-
     # enforce service certificate (opt-in)
-    if request.app["config"].get("force_privacy_mode") and not cdm._sessions[session_id].service_certificate:
+    # TODO: Add a way to check if there's a service certificate set properly
+    if request.app["config"].get("force_privacy_mode") and not cdm._Cdm__sessions[session_id].service_certificate:
         return web.json_response({
             "status": 403,
             "message": "No Service Certificate set but Privacy Mode is Enforced."
@@ -216,12 +214,28 @@ async def challenge(request: web.Request) -> web.Response:
     init_data = PSSH(body["init_data"])
 
     # get challenge
-    license_request = cdm.get_license_challenge(
-        session_id=session_id,
-        pssh=init_data,
-        type_=LicenseType.Value(request.match_info["license_type"]),
-        privacy_mode=True
-    )
+    try:
+        license_request = cdm.get_license_challenge(
+            session_id=session_id,
+            pssh=init_data,
+            type_=license_type,
+            privacy_mode=True
+        )
+    except InvalidSession:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid Session ID '{session_id.hex()}', it may have expired."
+        }, status=400)
+    except InvalidInitData as e:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid Init Data, {e}"
+        }, status=400)
+    except InvalidLicenseType:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid License Type '{license_type}'"
+        }, status=400)
 
     return web.json_response({
         "status": 200,
@@ -232,8 +246,8 @@ async def challenge(request: web.Request) -> web.Response:
     }, status=200)
 
 
-@routes.post("/{device}/keys/{key_type}")
-async def keys(request: web.Request) -> web.Response:
+@routes.post("/{device}/parse_license")
+async def parse_license(request: web.Request) -> web.Response:
     secret_key = request.headers["X-Secret-Key"]
     device_name = request.match_info["device"]
 
@@ -248,21 +262,64 @@ async def keys(request: web.Request) -> web.Response:
     # get session id
     session_id = bytes.fromhex(body["session_id"])
 
+    # get cdm
+    cdm: Optional[Cdm] = request.app["cdms"].get((secret_key, device_name))
+    if not cdm:
+        return web.json_response({
+            "status": 400,
+            "message": f"No Cdm session for {device_name} has been opened yet. No session to use."
+        }, status=400)
+
+    # parse the license message
+    try:
+        cdm.parse_license(session_id, body["license_message"])
+    except InvalidSession:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid Session ID '{session_id.hex()}', it may have expired."
+        }, status=400)
+    except InvalidLicenseMessage as e:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid License Message, {e}"
+        }, status=400)
+    except InvalidContext as e:
+        return web.json_response({
+            "status": 400,
+            "message": f"Invalid Context, {e}"
+        }, status=400)
+    except SignatureMismatch:
+        return web.json_response({
+            "status": 400,
+            "message": "Signature Validation failed on the License Message, rejecting."
+        }, status=400)
+
+    return web.json_response({
+        "status": 200,
+        "message": "Successfully parsed and loaded the Keys from the License message."
+    })
+
+
+@routes.post("/{device}/get_keys/{key_type}")
+async def get_keys(request: web.Request) -> web.Response:
+    secret_key = request.headers["X-Secret-Key"]
+    device_name = request.match_info["device"]
+
+    body = await request.json()
+    for required_field in ("session_id",):
+        if not body.get(required_field):
+            return web.json_response({
+                "status": 400,
+                "message": f"Missing required field '{required_field}' in JSON body."
+            }, status=400)
+
+    # get session id
+    session_id = bytes.fromhex(body["session_id"])
+
     # get key type
     key_type = request.match_info["key_type"]
     if key_type == "ALL":
         key_type = None
-    else:
-        try:
-            if key_type.isdigit():
-                key_type = License.KeyContainer.KeyType.Name(int(key_type))
-            else:
-                License.KeyContainer.KeyType.Value(key_type)  # only test
-        except ValueError as e:
-            return web.json_response({
-                "status": 400,
-                "message": f"The Key Type value is invalid, {e}"
-            }, status=400)
 
     # get cdm
     cdm = request.app["cdms"].get((secret_key, device_name))
@@ -272,29 +329,29 @@ async def keys(request: web.Request) -> web.Response:
             "message": f"No Cdm session for {device_name} has been opened yet. No session to use."
         }, status=400)
 
-    if session_id not in cdm._sessions:
-        # This can happen if:
-        # - API server gets shutdown/restarted,
-        # - The user calls /challenge before /open,
-        # - The user called /open on a different IP Address
-        # - The user closed the session
+    # get keys
+    try:
+        keys = cdm.get_keys(session_id, key_type)
+    except InvalidSession:
         return web.json_response({
             "status": 400,
-            "message": "Invalid Session ID. Session ID may have Expired."
+            "message": f"Invalid Session ID '{session_id.hex()}', it may have expired."
+        }, status=400)
+    except ValueError as e:
+        return web.json_response({
+            "status": 400,
+            "message": f"The Key Type value '{key_type}' is invalid, {e}"
         }, status=400)
 
-    # parse the license message
-    cdm.parse_license(session_id, body["license_message"])
-
-    # prepare the keys
-    license_keys = [
+    # get the keys in json form
+    keys_json = [
         {
             "key_id": key.kid.hex,
             "key": key.key.hex(),
             "type": key.type,
             "permissions": key.permissions,
         }
-        for key in cdm._sessions[session_id].keys
+        for key in keys
         if not key_type or key.type == key_type
     ]
 
@@ -302,8 +359,7 @@ async def keys(request: web.Request) -> web.Response:
         "status": 200,
         "message": "Success",
         "data": {
-            # TODO: Add derived context keys like enc/mac[client]/mac[server]
-            "keys": license_keys
+            "keys": keys_json
         }
     })
 
