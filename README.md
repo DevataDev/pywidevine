@@ -16,6 +16,108 @@
     </a>
 </p>
 
+## Features
+
+- 🛡️ Security-first approach; All user input has Signatures verified
+- 👥 Remotely accessible Server/Client CDM code
+- 📦 Supports parsing and serialization of WVD (v2) provisions
+- 🛠️ Class for creation, parsing, and conversion of PSSH data
+- 🧩 Plug-and-play installation via PIP/PyPI
+- 🗃️ YAML configuration files
+- ❤️ Forever FOSS!
+
+## Installation
+
+*Note: Requires [Python] 3.7.0 or newer with PIP installed.*
+
+```shell
+$ pip install pywidevine
+```
+
+You now have the `pywidevine` package installed and a `pywidevine` executable is now available.
+Check it out with `pywidevine --help` - Voilà 🎉!
+
+### From Source Code
+
+The following steps are instructions on download, preparing, and running the code under a Poetry environment.
+You can skip steps 3-5 with a simple `pip install .` call instead, but you miss out on a wide array of benefits.
+
+1. `git clone https://github.com/rlaphoenix/pywidevine`
+2. `cd pywidevine`
+3. (optional) `poetry config virtualenvs.in-project true` 
+4. `poetry install`
+5. `poetry run pywidevine --help`
+
+As seen in Step 5, running the `pywidevine` executable is somewhat different to a normal PIP installation.
+See [Poetry's Docs] on various ways of making calls under the virtual-environment.
+
+  [Python]: <https://python.org>
+  [Poetry]: <https://python-poetry.org>
+  [Poetry's Docs]: <https://python-poetry.org/docs/basic-usage/#using-your-virtual-environment>
+
+## Usage
+
+The following is a minimal example of using pywidevine in a script. It gets a License for Bitmovin's
+Art of Motion Demo. There's various stuff not shown in this specific example like:
+
+- Privacy Mode
+- Setting Service Certificates
+- Remote CDMs and Serving
+- Choosing a License Type to request
+- Creating WVD files
+- and much more!
+
+Just take a look around the Cdm code to see what stuff does. Everything is documented quite well.
+There's also various functions in `main.py` that showcases a lot of features.
+
+```py
+from pywidevine.cdm import Cdm
+from pywidevine.device import Device
+from pywidevine.pssh import PSSH
+
+import requests
+
+# prepare pssh
+pssh = PSSH("AAAAW3Bzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAADsIARIQ62dqu8s0Xpa"
+            "7z2FmMPGj2hoNd2lkZXZpbmVfdGVzdCIQZmtqM2xqYVNkZmFsa3IzaioCSEQyAA==")
+
+# load device
+device = Device.load("C:/Path/To/A/Provision.wvd")
+
+# load cdm
+cdm = Cdm.from_device(device)
+
+# open cdm session
+session_id = cdm.open()
+
+# get license challenge
+challenge = cdm.get_license_challenge(session_id, pssh)
+
+# send license challenge (assuming a generic license server SDK with no API front)
+licence = requests.post("https://...", data=challenge)
+licence.raise_for_status()
+
+# parse license challenge
+cdm.parse_license(session_id, licence.content)
+
+# print keys
+for key in cdm.get_keys(session_id):
+    print(f"[{key.type}] {key.kid.hex}:{key.key.hex()}")
+
+# close session, disposes of session data
+cdm.close(session_id)
+```
+
+## Troubleshooting
+
+### Executable `pywidevine` was not found
+
+Make sure the Python installation's Scripts directory is added to your Path Environment Variable.
+
+If this happened under a Poetry environment, make sure you use the appropriate Poetry-specific way of calling
+the executable. You may make this executable available globally by adding the .venv's Scripts folder to your
+Path Environment Variable.
+
 ## Disclaimer
 
 1. This project requires a valid Google-provisioned Private Key and Client Identification blob which are not
@@ -26,23 +128,6 @@
 4. This project does not condone piracy or any action against the terms of the DRM systems.
 5. All efforts in this project have been the result of Reverse-Engineering, Publicly available research, and Trial
    & Error.
-
-## Protocol
-
-![widevine-overview](docs/images/widevine_overview.svg)
-
-### Web Server
-
-This may be an API/Server in front of a License Server. For example, Netflix's Custom MSL-based API front.
-This is evident by their custom Service Certificate which would only be needed if they had to read the License.
-
-### Net, Media Stack and MediaKeySession
-
-These generally refer to the Encrypted Media Extensions API on Browsers.
-
-Under the assumption of the Android Widevine ecosystem, you can think of `Net` as the Application Code, `Media Stack`
-as the OEM Crypto Library, and `MediaKeySession` as a Session. The orange wrapper titled `Browser` is effectively the
-Application as a whole, while `Platform` (in Green at the bottom) would be the OS or Other libraries.
 
 ## Key and Output Security
 
@@ -76,8 +161,7 @@ making a CDM in C++ has immediate security benefits and a lot of methods to obsc
 
 ## Credit
 
-- Widevine Icons &copy; Google.
-- Protocol Overview &copy; https://www.w3.org/TR/encrypted-media -- slightly modified to fit the page better.
+- Widevine Icon &copy; Google.
 - The awesome community for their shared research and insight into the Widevine Protocol and Key Derivation.
 
 ## License

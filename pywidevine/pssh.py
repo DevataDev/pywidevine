@@ -108,13 +108,11 @@ class PSSH:
         flags: int = 0
     ) -> PSSH:
         """Craft a new version 0 or 1 PSSH Box."""
-        if key_ids is not None:
-            if not isinstance(key_ids, list):
-                raise TypeError(f"Expected key_ids to be a list not {key_ids!r}")
+        if key_ids is not None and not isinstance(key_ids, list):
+            raise TypeError(f"Expected key_ids to be a list not {key_ids!r}")
 
-        if init_data is not None:
-            if not isinstance(init_data, (WidevinePsshData, str, bytes)):
-                raise TypeError(f"Expected init_data to be a {WidevinePsshData}, base64, or bytes, not {init_data!r}")
+        if init_data is not None and not isinstance(init_data, (WidevinePsshData, str, bytes)):
+            raise TypeError(f"Expected init_data to be a {WidevinePsshData}, base64, or bytes, not {init_data!r}")
 
         if not isinstance(version, int):
             raise TypeError(f"Expected version to be an int not {version!r}")
@@ -124,7 +122,7 @@ class PSSH:
         if not isinstance(flags, int):
             raise TypeError(f"Expected flags to be an int not {flags!r}")
         if flags < 0:
-            raise ValueError(f"Invalid flags, cannot be less than 0.")
+            raise ValueError("Invalid flags, cannot be less than 0.")
 
         if version == 0 and key_ids is not None and init_data is not None:
             # v0 boxes use only init_data in the pssh field, but we can use the key_ids within the init_data

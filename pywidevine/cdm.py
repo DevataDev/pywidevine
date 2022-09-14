@@ -208,14 +208,14 @@ class Cdm:
             else:
                 signed_drm_certificate.ParseFromString(certificate)
                 if signed_drm_certificate.SerializeToString() != certificate:
-                    raise DecodeError()
+                    raise DecodeError("partial parse")
                 # Craft a SignedMessage as it's stored as a SignedMessage
                 signed_message.Clear()
                 signed_message.msg = signed_drm_certificate.SerializeToString()
                 # we don't need to sign this message, this is normal
-        except DecodeError:
+        except DecodeError as e:
             # could be a direct unsigned DrmCertificate, but reject those anyway
-            raise DecodeError("Could not parse certificate as a SignedDrmCertificate")
+            raise DecodeError(f"Could not parse certificate as a SignedDrmCertificate, {e}")
 
         try:
             pss. \
@@ -231,6 +231,24 @@ class Cdm:
             drm_certificate = DrmCertificate()
             drm_certificate.ParseFromString(signed_drm_certificate.drm_certificate)
             return drm_certificate.provider_id
+
+    def get_service_certificate(self, session_id: bytes) -> Optional[SignedMessage]:
+        """
+        Get the currently set Service Privacy Certificate of the Session.
+
+        Parameters:
+            session_id: Session identifier.
+
+        Raises:
+            InvalidSession: If the Session identifier is invalid.
+
+        Returns the Service Certificate if one is set, otherwise None.
+        """
+        session = self.__sessions.get(session_id)
+        if not session:
+            raise InvalidSession(f"Session identifier {session_id!r} is invalid.")
+
+        return session.service_certificate
 
     def get_license_challenge(
         self,
@@ -360,6 +378,8 @@ class Cdm:
             signed_message = SignedMessage()
             try:
                 signed_message.ParseFromString(license_message)
+                if signed_message.SerializeToString() != license_message:
+                    raise DecodeError(license_message)
             except DecodeError as e:
                 raise InvalidLicenseMessage(f"Could not parse license_message as a SignedMessage, {e}")
             license_message = signed_message
