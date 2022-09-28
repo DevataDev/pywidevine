@@ -19,8 +19,8 @@ class PSSH:
     """PSSH-related utilities. Somewhat Widevine-biased."""
 
     class SystemId:
-        Widevine = UUID(bytes=b"\xed\xef\x8b\xa9\x79\xd6\x4a\xce\xa3\xc8\x27\xdc\xd5\x1d\x21\xed")
-        PlayReady = UUID(bytes=b"\x9a\x04\xf0\x79\x98\x40\x42\x86\xab\x92\xe6\x5b\xe0\x88\x5f\x95")
+        Widevine = UUID(hex="edef8ba979d64acea3c827dcd51d21ed")
+        PlayReady = UUID(hex="9a04f07998404286ab92e65be0885f95")
 
     def __init__(self, data: Union[Container, str, bytes], strict: bool = False):
         """
@@ -199,7 +199,11 @@ class PSSH:
             cenc_header.ParseFromString(self.init_data)
             return [
                 # the key_ids value may or may not be hex underlying
-                UUID(bytes=key_id) if len(key_id) == 16 else UUID(hex=key_id.decode())
+                (
+                    UUID(bytes=key_id) if len(key_id) == 16 else  # normal
+                    UUID(hex=key_id.decode()) if len(key_id) == 32 else  # stored as hex
+                    UUID(int=int.from_bytes(key_id, "big"))  # assuming as number
+                )
                 for key_id in cenc_header.key_ids
             ]
 

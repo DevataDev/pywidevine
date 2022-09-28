@@ -62,7 +62,7 @@ class Cdm:
     root_cert = DrmCertificate()
     root_cert.ParseFromString(root_signed_cert.drm_certificate)
 
-    MAX_NUM_OF_SESSIONS = 50  # most common limit
+    MAX_NUM_OF_SESSIONS = 16
 
     def __init__(
         self,
@@ -185,10 +185,14 @@ class Cdm:
             raise InvalidSession(f"Session identifier {session_id!r} is invalid.")
 
         if certificate is None:
-            drm_certificate = DrmCertificate()
-            drm_certificate.ParseFromString(session.service_certificate.drm_certificate)
+            if session.service_certificate:
+                drm_certificate = DrmCertificate()
+                drm_certificate.ParseFromString(session.service_certificate.drm_certificate)
+                provider_id = drm_certificate.provider_id
+            else:
+                provider_id = None
             session.service_certificate = None
-            return drm_certificate.provider_id
+            return provider_id
 
         if isinstance(certificate, str):
             try:
@@ -200,6 +204,7 @@ class Cdm:
 
         signed_message = SignedMessage()
         signed_drm_certificate = SignedDrmCertificate()
+        drm_certificate = DrmCertificate()
 
         try:
             signed_message.ParseFromString(certificate)
@@ -209,10 +214,6 @@ class Cdm:
                 signed_drm_certificate.ParseFromString(certificate)
                 if signed_drm_certificate.SerializeToString() != certificate:
                     raise DecodeError("partial parse")
-                # Craft a SignedMessage as it's stored as a SignedMessage
-                signed_message.Clear()
-                signed_message.msg = signed_drm_certificate.SerializeToString()
-                # we don't need to sign this message, this is normal
         except DecodeError as e:
             # could be a direct unsigned DrmCertificate, but reject those anyway
             raise DecodeError(f"Could not parse certificate as a SignedDrmCertificate, {e}")
@@ -226,13 +227,20 @@ class Cdm:
                 )
         except (ValueError, TypeError):
             raise SignatureMismatch("Signature Mismatch on SignedDrmCertificate, rejecting certificate")
-        else:
-            session.service_certificate = signed_message
-            drm_certificate = DrmCertificate()
-            drm_certificate.ParseFromString(signed_drm_certificate.drm_certificate)
-            return drm_certificate.provider_id
 
-    def get_service_certificate(self, session_id: bytes) -> Optional[SignedMessage]:
+        try:
+            drm_certificate.ParseFromString(signed_drm_certificate.drm_certificate)
+            if drm_certificate.SerializeToString() != signed_drm_certificate.drm_certificate:
+                raise DecodeError("partial parse")
+        except DecodeError as e:
+            raise DecodeError(f"Could not parse signed certificate's message as a DrmCertificate, {e}")
+
+        # must be stored as a SignedDrmCertificate as the signature needs to be kept for RemoteCdm
+        # if we store as DrmCertificate (no signature) then RemoteCdm cannot verify the Certificate
+        session.service_certificate = signed_drm_certificate
+        return drm_certificate.provider_id
+
+    def get_service_certificate(self, session_id: bytes) -> Optional[SignedDrmCertificate]:
         """
         Get the currently set Service Privacy Certificate of the Session.
 
@@ -541,7 +549,7 @@ class Cdm:
     @staticmethod
     def encrypt_client_id(
         client_id: ClientIdentification,
-        service_certificate: Union[SignedMessage, SignedDrmCertificate, DrmCertificate],
+        service_certificate: Union[SignedDrmCertificate, DrmCertificate],
         key: bytes = None,
         iv: bytes = None
     ) -> EncryptedClientIdentification:
@@ -549,10 +557,6 @@ class Cdm:
         privacy_key = key or get_random_bytes(16)
         privacy_iv = iv or get_random_bytes(16)
 
-        if isinstance(service_certificate, SignedMessage):
-            signed_drm_certificate = SignedDrmCertificate()
-            signed_drm_certificate.ParseFromString(service_certificate.msg)
-            service_certificate = signed_drm_certificate
         if isinstance(service_certificate, SignedDrmCertificate):
             drm_certificate = DrmCertificate()
             drm_certificate.ParseFromString(service_certificate.drm_certificate)
