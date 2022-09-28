@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2022-09-24
+
+With just one change this brings along a reduced dependency tree, smoother experience across different platforms, and
+speed improvements (especially on larger input messages).
+
+### Changed
+
+- Updated protobuf dependency to v4.x branch with recompiled proto-buffers. They now also have python stub files.
+
+## [1.4.4] - 2022-09-24
+
+### Security
+
+- Updated `protobuf` dependency to v3.19.5 due to the Security Advisory [GHSA-8gq9-2x98-w8hf].
+
+  [GHSA-8gq9-2x98-w8hf]: <https://github.com/protocolbuffers/protobuf/security/advisories/GHSA-8gq9-2x98-w8hf>
+
 ## [1.4.3] - 2022-09-10
 
 RemoteCdm minimum supported Serve API version is now v1.4.3.
@@ -279,6 +296,8 @@ This release is primarily a maintenance release for `serve` functionality but so
 
 Initial Release.
 
+[1.5.0]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.5.0
+[1.4.4]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.4.4
 [1.4.3]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.4.3
 [1.4.2]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.4.2
 [1.4.1]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.4.1

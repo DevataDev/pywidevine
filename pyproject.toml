@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "pywidevine"
-version = "1.4.3"
+version = "1.5.0"
 description = "Widevine CDM (Content Decryption Module) implementation in Python."
 authors = ["rlaphoenix <rlaphoenix@pm.me>"]
 license = "GPL-3.0-only"
@@ -28,7 +28,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.7,<3.11"
-protobuf = "3.19.3"
+protobuf = "4.21.6"
 pymp4 = "^1.2.0"
 pycryptodome = "^3.15.0"
 click = "^8.1.3"
