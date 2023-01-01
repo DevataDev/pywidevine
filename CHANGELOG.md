@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2022-12-27
+
+### Added
+
+- Added a new utility `load_xml()` to parse XML data with lxml ignoring Namespaces.
+- PSSH class now has a `__str__` and `__repr__` representation to print the object in more Human-friendly and
+  useful ways. `str(pssh)` is now identical to `pssh.dumps()` and `repr(pssh)` or just `pssh` in some cases will
+  result in a nice overview of the PSSHs contents.
+- Added new `to_playready()` method to convert Widevine PSSH Data to PlayReady PSSH Data. Please note that the
+  Checksums for AES-CTR and COCKTAIL KIDs cannot be calculated as the Content Encryption Key would be needed.
+
+### Changed
+
+- You must now explicitly specify the System ID to use when creating a new PSSH box.
+  This allows you to now create PlayReady PSSH boxes.
+- The `playready_to_widevine()` method has been renamed to just `to_widevine()`.
+
+### Fixed
+
+- Fix the capitalization of the `key_IDs` field, and it's value when creating a new PSSH box.
+- Fix the ability to create v0 PSSH boxes by only setting the `key_IDs` field when the version is set to `1`.
+- Fix parsing of Key IDs within PlayReadyHeaders by using the new `load_xml()` utility to ignore namespaces so
+  that `xpath` can correctly locate any and all KID tags.
+- Fix loading of PlayReadyHeaders (and PlayReadyObjects) as PSSH boxes. It would previously load it under the
+  Widevine SystemID breaking all PlayReady-specific code after construction.
+- Fix support for loading PlayReadyObjects with more than one PlayReadyHeader (more than one record).
+
+## [1.5.2] - 2022-10-11
+
+### Fixed
+
+- Fixed license signature calculation for newer Widevine Server licenses on OEM Crypto v16.0.0 or newer.
+  The `oemcrypto_core_message` data needed to be part of the HMAC ingest if available.
+
+## [1.5.1] - 2022-10-23
+
+### Added
+
+- Added import path shortcuts in the `__init__.py` package constructor to all the user classes. Now you can do e.g.,
+  `from pywidevine import PSSH` instead of `from pywidevine.pssh import PSSH`. You can still do it both ways.
+- Improved error handling and sanitization checks when parsing some Service Certificates in `set_service_certificate()`.
+
+### Changed
+
+- Maximum concurrent Cdm sessions are now set to 16 as it seems tto be a more common limit on more up-to-date CDMs,
+  including Android's OEMCrypto Library. This also helps encourage people to close their sessions when they are no
+  longer required.
+- Service Certificates are now stored in the session as a `SignedDrmCertificate`. This is to keep the signature with
+  the stored Certificate for use by the user if necessary. It also reduces code repetition relating to the usage of the
+  signature.
+
+### Fixed
+
+- Improved reliability of computing License Signatures. Some license messages when parsed would be slightly different
+  when re-serialized with `SerializeToString()`, therefore the computed signature would have always mismatched.
+- Added support for Key IDs that are integer values. Effectively all values are now considered to be a UUID as 16 bytes
+  (in hex or bytes) or an integer value with support for up to 16 bytes. All integer values are converted to a UUID and
+  are loaded big-endian.
+- Fixed acquisition of the Certificate's provider_id within `set_service_certificate()` in some edge cases, but also
+  when you try to remove the certificate by setting it to `None`.
+- PSSH now dumps in the same version the PSSH was loaded or created in. Previously it would always dump as a v1 PSSH
+  box due to a cascading check in pymp4. It now also honors the currently set version in the case it gets overridden.
+
 ## [1.5.0] - 2022-09-24
 
 With just one change this brings along a reduced dependency tree, smoother experience across different platforms, and
@@ -296,6 +359,9 @@ This release is primarily a maintenance release for `serve` functionality but so
 
 Initial Release.
 
+[1.5.3]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.5.3
+[1.5.2]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.5.2
+[1.5.1]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.5.1
 [1.5.0]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.5.0
 [1.4.4]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.4.4
 [1.4.3]: https://github.com/rlaphoenix/pywidevine/releases/tag/v1.4.3
